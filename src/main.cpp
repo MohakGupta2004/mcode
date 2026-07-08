@@ -20,6 +20,7 @@ int main() {
     ProviderManager provider;
     storage.load(conversation);
     provider.registerProvider(std::make_shared<OpenRouter>());
+    provider.setModel("openai/gpt-4o-mini");
     config.load();
     while(true) {
       std::string input;
