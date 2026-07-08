@@ -28,7 +28,7 @@ bool Commander::handle(std::string input, Conversation &conversation,
         std::cout<<"Usage: /model <model-name>" <<std::endl;
       }
       std::string model_name = input.substr(7);
-      provider.setProvider(model_name);
+      provider.setModel(model_name);
       return true;
     } catch (const std::out_of_range e) {
       return true;

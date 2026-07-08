@@ -6,8 +6,7 @@
 #include <stdexcept>
 #include "config/config.h"
 #include "conversation/conversation.h"
-#include "providers/claude_provider.h"
-#include "providers/openai_provider.h"
+#include "providers/openrouter_provider.h"
 #include "providers/provider_manager.h"
 #include "storage/storage.h"
 #include "commander/commander.h"
@@ -20,15 +19,8 @@ int main() {
     Config config;
     ProviderManager provider;
     storage.load(conversation);
-    provider.registerProvider(std::make_shared<Openai>());
-    provider.registerProvider(std::make_shared<Claude>());
+    provider.registerProvider(std::make_shared<OpenRouter>());
     config.load();
-    try {
-      provider.setProvider("openai");
-    } catch (const std::runtime_error e) {
-      std::cerr<<"Failed to initialize provider: "<<e.what()<<std::endl;
-      return 1;
-    }
     while(true) {
       std::string input;
       std::cout<<"> ";

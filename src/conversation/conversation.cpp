@@ -1,6 +1,5 @@
 #include "conversation.h"
 #include <iostream>
-#include <optional>
 #include <vector>
 void Conversation::addMessage(const Message &msg) { message.push_back(msg); }
 void Conversation::printHistory() const {

@@ -3,13 +3,13 @@
 #include "providers.h"
 #include <memory>
 #include <string>
-#include <unordered_map>
 class ProviderManager {
-    private: 
-      std::unordered_map<std::string, std::shared_ptr<Provider>> providers; 
+    private:
       std::shared_ptr<Provider> active_provider;
     public:
+      // Register the single gateway provider (OpenRouter) and make it active.
       void registerProvider(const std::shared_ptr<Provider>& provider);
-      void setProvider(std::string model_name);
-      Provider& getCurrentProvider(); 
+      // Select a model on the active gateway. Does not switch providers.
+      void setModel(const std::string& model_name);
+      Provider& getCurrentProvider();
 };

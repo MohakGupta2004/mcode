@@ -6,12 +6,12 @@
 Provider &ProviderManager::getCurrentProvider() { return *active_provider; }
 
 void ProviderManager::registerProvider(const std::shared_ptr<Provider> &provider) {
-  providers[provider->getName()] = provider;
+  active_provider = provider;
 }
 
-void ProviderManager::setProvider(std::string model_name) {
-  if(!providers[model_name])  {
-    throw std::runtime_error("Model does not exists");
+void ProviderManager::setModel(const std::string &model_name) {
+  if (!active_provider) {
+    throw std::runtime_error("No provider registered");
   }
-  active_provider = providers[model_name];
+  active_provider->setModel(model_name);
 }
