@@ -4,10 +4,11 @@
 #include <string>
 #include <vector>
 #include "../config/config.h"
+#include "../tools/tool_manager.h"
 #include "../models/message.h"
 class Provider {
   public:
-    virtual std::pair<std::string, std::string> ask(const std::vector<Message> &history, Config& config) = 0;
+    virtual std::pair<std::string, std::string> ask(const std::vector<Message> &history, Config& config, ToolManager& tool) = 0;
 
     // Gateway identifier (e.g. "openrouter"). This is the provider/gateway name,
     // NOT a model name. A single gateway can serve many models.

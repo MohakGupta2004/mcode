@@ -2,14 +2,14 @@
 #include <cpr/response.h>
 #include <iostream>
 #include <memory>
-#include <ostream>
-#include <stdexcept>
 #include "config/config.h"
 #include "conversation/conversation.h"
 #include "providers/openrouter_provider.h"
 #include "providers/provider_manager.h"
 #include "storage/storage.h"
 #include "commander/commander.h"
+#include "tools/read_file.h"
+#include "tools/tool_manager.h"
 #include <cpr/cpr.h>
 #include <utility>
 int main() {
@@ -18,9 +18,13 @@ int main() {
     Commander handler;
     Config config;
     ProviderManager provider;
+    ToolManager tool_manager;
+
     storage.load(conversation);
     provider.registerProvider(std::make_shared<OpenRouter>());
     provider.setModel("openai/gpt-4o-mini");
+    tool_manager.registerTool(std::make_shared<ReadFile>());
+
     config.load();
     while(true) {
       std::string input;
@@ -35,7 +39,7 @@ int main() {
       conversation.addMessage({
         "user", input
       });
-      std::pair<std::string, std::string> response = provider.getCurrentProvider().ask(conversation.getMessage(), config);
+      std::pair<std::string, std::string> response = provider.getCurrentProvider().ask(conversation.getMessage(), config, tool_manager);
       conversation.addMessage({"assistant", response.first});
     }
     return 0;

@@ -8,7 +8,7 @@
 #include <string_view>
 
 std::pair<std::string, std::string>
-OpenRouter::ask(const std::vector<Message> &history, Config &config) {
+OpenRouter::ask(const std::vector<Message> &history, Config &config, ToolManager& tools) {
   const std::string API_KEY = config.getApiKey("openrouter");
   // TODO: implement OpenRouter API request (model = getModel()).
   std::string responseBuffer;
