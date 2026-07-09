@@ -26,6 +26,10 @@ bool Commander::handle(std::string input, Conversation &conversation,
     try {
       if(input.size()<=7) {
         std::cout<<"Usage: /model <model-name>" <<std::endl;
+        std::vector<std::string> models = provider.getCurrentProvider().getModels();
+        for(std::string m:models) {
+          std::cout<<m<<std::endl;
+        }
       }
       std::string model_name = input.substr(7);
       provider.setModel(model_name);
