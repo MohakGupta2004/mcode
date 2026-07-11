@@ -31,10 +31,9 @@ int main() {
 
     config.load();
     while(true) {
-      std::string input;
-      std::cout<<"> ";
-      std::getline(std::cin, input);
-      if(input == "exit") {
+      bool eof = false;
+      std::string input = handler.readLine("> ", eof);
+      if(eof || input == "exit") {
         break;
       }
       if(handler.handle(input, conversation,storage, provider))  {
