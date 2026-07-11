@@ -20,13 +20,9 @@ class CreateFile : public Tool {
         {"content", {
           {"type", "string"},
           {"description", "Content of the file which should be written or overwritten or added. If not mentioned then empty file."}
-        }},
-        {"extension", {
-          {"type", "string"},
-          {"description", "Extension of the file which should be added after the file. If not mentioned then .md file."}
         }}
       }},
-      {"required", {"path", "content", "extension"}}
+      {"required", {"path", "content"}}
     };
   }
 

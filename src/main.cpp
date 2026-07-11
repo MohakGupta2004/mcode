@@ -8,6 +8,7 @@
 #include "providers/provider_manager.h"
 #include "storage/storage.h"
 #include "commander/commander.h"
+#include "tools/create_directory.h"
 #include "tools/create_file.h"
 #include "tools/read_file.h"
 #include "tools/tool_manager.h"
@@ -26,6 +27,7 @@ int main() {
     provider.setModel("tencent/hy3:free");
     tool_manager.registerTool(std::make_shared<ReadFile>());
     tool_manager.registerTool(std::make_shared<CreateFile>());
+    tool_manager.registerTool(std::make_shared<CreateDirectory>());
 
     config.load();
     while(true) {

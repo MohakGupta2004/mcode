@@ -11,20 +11,17 @@ std::string CreateFile::execute(nlohmann::json &arguements) {
   if (!arguements.contains("content") || !arguements["content"].is_string()) {
     return "Error: missing required string argument 'content'";
   }
-  if (!arguements.contains("extension") || !arguements["extension"].is_string()) {
-    return "Error: missing required string argument 'extension'";
-  }
+
 
   std::string path = arguements["path"].get<std::string>();
-  std::string extension = arguements["extension"].get<std::string>();
   std::string content = arguements["content"].get<std::string>();
 
-  std::ofstream output(path + extension);
+  std::ofstream output(path);
   if (!output.is_open()) {
     return "Error: Could not create or open the file!"; 
   }
 
   output<<content<<std::endl;
   output.clear();
-  return path+extension+" file has been created";
+  return path+" file has been created";
 }
