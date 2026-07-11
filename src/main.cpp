@@ -8,6 +8,7 @@
 #include "providers/provider_manager.h"
 #include "storage/storage.h"
 #include "commander/commander.h"
+#include "tools/create_file.h"
 #include "tools/read_file.h"
 #include "tools/tool_manager.h"
 #include <cpr/cpr.h>
@@ -22,8 +23,9 @@ int main() {
 
     storage.load(conversation);
     provider.registerProvider(std::make_shared<OpenRouter>());
-    provider.setModel("openai/gpt-4o-mini");
+    provider.setModel("tencent/hy3:free");
     tool_manager.registerTool(std::make_shared<ReadFile>());
+    tool_manager.registerTool(std::make_shared<CreateFile>());
 
     config.load();
     while(true) {
