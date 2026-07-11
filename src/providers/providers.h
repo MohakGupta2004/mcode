@@ -17,6 +17,8 @@ class Provider {
     // Model selection within the gateway. OpenRouter routes to many models, so the
     // model is a separate axis from the provider name and must not collide with it.
     virtual void setModel(const std::string& model) = 0;
+    // Currently selected model id ("" if none set yet).
+    virtual std::string getModel() const = 0;
     virtual std::vector<std::string> getModels() const = 0;
     virtual ~Provider()=default;
 };

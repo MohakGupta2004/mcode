@@ -162,6 +162,8 @@ std::string OpenRouter::getName() const { return "openrouter"; }
 
 void OpenRouter::setModel(const std::string &model) { this->model = model; }
 
+std::string OpenRouter::getModel() const { return model; }
+
 std::vector<std::string> OpenRouter::getModels() const {
   auto r = cpr::Get(cpr::Url("https://openrouter.ai/api/v1/models?sort=pricing-low-to-high"));
   if(r.status_code != 200) {

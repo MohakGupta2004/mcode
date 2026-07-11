@@ -1,5 +1,6 @@
 #include "commander.h"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -316,6 +317,133 @@ std::string filePicker() {
   return result;
 }
 
+// Interactive model chooser. Renders a scrolling, type-to-filter list of model
+// ids and lets the user move with the arrow keys and commit with Enter. Returns
+// the chosen model id, or "" if the user cancels (esc / ctrl-c / ctrl-d).
+//
+// Unlike filePicker this owns its own RawMode guard, because it is invoked from
+// command handling where the terminal is back in cooked mode.
+std::string modelPicker(const std::vector<std::string>& models,
+                        const std::string& current) {
+  RawMode raw;
+  if (!raw.ok()) {
+    return ""; // not a tty; caller falls back to `/model <name>`
+  }
+
+  const int kWindow = 12; // max visible rows
+  std::string filter;
+  int selected = 0;
+  int prevLines = 0;
+
+  auto lower = [](std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return s;
+  };
+
+  std::cout << "\x1b[?25l"; // hide cursor
+
+  auto clearMenu = [&]() {
+    if (prevLines > 0) {
+      std::cout << "\x1b[" << prevLines << "A"; // up N lines
+    }
+    std::cout << "\r\x1b[J"; // clear from cursor to end of screen
+  };
+
+  std::string result;
+  bool done = false;
+  while (!done) {
+    // Build the filtered view fresh each frame so typing narrows the list.
+    std::string needle = lower(filter);
+    std::vector<const std::string*> view;
+    for (const std::string& m : models) {
+      if (needle.empty() || lower(m).find(needle) != std::string::npos) {
+        view.push_back(&m);
+      }
+    }
+    if (selected >= static_cast<int>(view.size())) {
+      selected = view.empty() ? 0 : static_cast<int>(view.size()) - 1;
+    }
+    if (selected < 0) {
+      selected = 0;
+    }
+
+    clearMenu();
+
+    std::cout << "\x1b[2m  model: " << (filter.empty() ? "" : filter)
+              << "  (↑↓ move · ⏎ pick · esc cancel)\x1b[0m\r\n";
+    int lines = 1;
+
+    int first = 0;
+    if (selected >= kWindow) {
+      first = selected - kWindow + 1;
+    }
+    int last = std::min(static_cast<int>(view.size()), first + kWindow);
+    for (int i = first; i < last; ++i) {
+      const std::string& m = *view[i];
+      bool isCurrent = (m == current);
+      std::string label = std::string("  ") + (isCurrent ? "* " : "  ") + m;
+      if (i == selected) {
+        std::cout << "\x1b[7m" << label << "\x1b[0m\r\n"; // reverse video
+      } else if (isCurrent) {
+        std::cout << "\x1b[1m" << label << "\x1b[0m\r\n"; // bold current
+      } else {
+        std::cout << label << "\r\n";
+      }
+      ++lines;
+    }
+    if (view.empty()) {
+      std::cout << "\x1b[2m  (no matches)\x1b[0m\r\n";
+      ++lines;
+    }
+    prevLines = lines;
+    std::cout.flush();
+
+    char ch = 0;
+    Key k = readKey(ch);
+    switch (k) {
+    case Key::Up:
+      if (selected > 0) {
+        --selected;
+      }
+      break;
+    case Key::Down:
+      if (selected + 1 < static_cast<int>(view.size())) {
+        ++selected;
+      }
+      break;
+    case Key::Enter:
+      if (!view.empty()) {
+        result = *view[selected];
+        done = true;
+      }
+      break;
+    case Key::Backspace:
+      if (!filter.empty()) {
+        filter.pop_back();
+        selected = 0;
+      }
+      break;
+    case Key::Char:
+      filter += ch;
+      selected = 0;
+      break;
+    case Key::Escape:
+    case Key::CtrlC:
+    case Key::CtrlD:
+      done = true; // cancel, result stays empty
+      break;
+    default:
+      break;
+    }
+  }
+
+  clearMenu();
+  std::cout << "\x1b[?25h"; // show cursor
+  std::cout.flush();
+  return result;
+}
+
 // Redraw the input line: carriage return, clear line, prompt + buffer, then
 // place the terminal cursor at `cursor` within the buffer.
 void redrawLine(const std::string& prompt, const std::string& buf, size_t cursor) {
@@ -395,9 +523,13 @@ std::string Commander::readLine(const std::string& prompt, bool& eof) {
       if (ch == '@') {
         buf.insert(cursor, 1, '@');
         ++cursor;
-        std::cout << "\r\n"; // open modal below the input line
+        std::cout << "\r\n"; // open modal one line below the input line
         std::cout.flush();
         std::string picked = filePicker();
+        // filePicker leaves the cursor on the line where its menu began (one
+        // below the prompt). Step back up so we redraw over the original prompt
+        // line instead of duplicating it below.
+        std::cout << "\x1b[1A";
         if (!picked.empty()) {
           buf.insert(cursor, picked);
           cursor += picked.size();
@@ -437,22 +569,39 @@ bool Commander::handle(std::string input, Conversation &conversation,
     return true;
   }
 
-  if (input.substr(0, 7) == "/model " || input=="/model") {
+  if (input == "/model" || input.substr(0, 7) == "/model ") {
     try {
-      if(input.size()<=7) {
-        std::cout<<"Usage: /model <model-name>" <<std::endl;
-        std::vector<std::string> models = provider.getCurrentProvider().getModels();
-        for(std::string m:models) {
-          std::cout<<m<<std::endl;
-        }
+      // Direct form: "/model <name>" sets the model without the picker.
+      std::string arg = input.size() > 7 ? input.substr(7) : "";
+      // trim surrounding whitespace
+      auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+      arg.erase(arg.begin(), std::find_if(arg.begin(), arg.end(), notSpace));
+      arg.erase(std::find_if(arg.rbegin(), arg.rend(), notSpace).base(), arg.end());
+      if (!arg.empty()) {
+        provider.setModel(arg);
+        std::cout << "Model set: " << arg << std::endl;
+        return true;
       }
-      std::string model_name = input.substr(7);
-      provider.setModel(model_name);
+
+      // Bare "/model": open the interactive picker.
+      std::cout << "Loading models..." << std::flush;
+      std::vector<std::string> models = provider.getCurrentProvider().getModels();
+      std::cout << "\r\x1b[K"; // wipe the loading line
+      if (models.empty()) {
+        std::cout << "No models available." << std::endl;
+        return true;
+      }
+      std::string current = provider.getCurrentProvider().getModel();
+      std::string picked = modelPicker(models, current);
+      if (!picked.empty()) {
+        provider.setModel(picked);
+        std::cout << "Model set: " << picked << std::endl;
+      }
       return true;
-    } catch (const std::out_of_range e) {
+    } catch (const std::out_of_range& e) {
       return true;
-    } catch(const std::runtime_error e) {
-      std::cout<<e.what()<<std::endl;
+    } catch (const std::runtime_error& e) {
+      std::cout << e.what() << std::endl;
       return true;
     }
   }
