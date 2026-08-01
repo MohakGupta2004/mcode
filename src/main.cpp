@@ -4,14 +4,12 @@
 #include <memory>
 #include "config/config.h"
 #include "conversation/conversation.h"
-#include "providers/openrouter_provider.h"
 #include "providers/provider_manager.h"
 #include "storage/storage.h"
 #include "commander/commander.h"
-#include "tools/create_directory.h"
-#include "tools/create_file.h"
-#include "tools/read_file.h"
 #include "tools/tool_manager.h"
+#include "utils/tool_initializer.h"
+#include "utils/provider_initializer.h"
 #include <cpr/cpr.h>
 #include <utility>
 int main() {
@@ -23,11 +21,8 @@ int main() {
     ToolManager tool_manager;
 
     storage.load(conversation);
-    provider.registerProvider(std::make_shared<OpenRouter>());
-    provider.setModel("tencent/hy3:free");
-    tool_manager.registerTool(std::make_shared<ReadFile>());
-    tool_manager.registerTool(std::make_shared<CreateFile>());
-    tool_manager.registerTool(std::make_shared<CreateDirectory>());
+    initializeProviders(provider);
+    initializeTools(tool_manager);
 
     config.load();
     while(true) {

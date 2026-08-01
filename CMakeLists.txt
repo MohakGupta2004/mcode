@@ -13,7 +13,7 @@ endif()
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(cpr REQUIRED)
 
-add_executable(claude_cpp src/main.cpp src/storage/storage.cpp  src/conversation/conversation.cpp src/commander/commander.cpp src/providers/provider_manager.cpp src/providers/openrouter_provider.cpp src/config/config.cpp src/tools/tool_manager.cpp src/tools/read_file.cpp src/tools/create_file.cpp src/tools/create_directory.cpp)
+add_executable(claude_cpp src/main.cpp src/storage/storage.cpp  src/conversation/conversation.cpp src/commander/commander.cpp src/providers/provider_manager.cpp src/providers/openrouter_provider.cpp src/config/config.cpp src/tools/tool_manager.cpp src/tools/read_file.cpp src/tools/create_file.cpp src/tools/create_directory.cpp src/tools/edit_file.cpp src/tools/delete_file.cpp src/utils/tool_initializer.cpp src/utils/provider_initializer.cpp)
 
 target_link_libraries(
     claude_cpp
@@ -22,3 +22,5 @@ target_link_libraries(
 )
 
 target_link_libraries(claude_cpp PRIVATE cpr::cpr)
+
+target_include_directories(claude_cpp PRIVATE src)
