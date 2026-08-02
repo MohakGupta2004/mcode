@@ -1,8 +1,11 @@
 #include "commander.h"
+#include "../providers/openrouter_provider.h"
+#include "../providers/ollama_provider.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <termios.h>
@@ -444,6 +447,88 @@ std::string modelPicker(const std::vector<std::string>& models,
   return result;
 }
 
+// Interactive provider chooser. Same shape as modelPicker but over the fixed,
+// small gateway list ("openrouter", "ollama") rather than a fetched one.
+std::string providerPicker(const std::vector<std::string>& providers,
+                           const std::string& current) {
+  RawMode raw;
+  if (!raw.ok()) {
+    return "";
+  }
+
+  int selected = 0;
+  for (size_t i = 0; i < providers.size(); ++i) {
+    if (providers[i] == current) {
+      selected = static_cast<int>(i);
+    }
+  }
+  int prevLines = 0;
+
+  std::cout << "\x1b[?25l"; // hide cursor
+
+  auto clearMenu = [&]() {
+    if (prevLines > 0) {
+      std::cout << "\x1b[" << prevLines << "A";
+    }
+    std::cout << "\r\x1b[J";
+  };
+
+  std::string result;
+  bool done = false;
+  while (!done) {
+    clearMenu();
+
+    std::cout << "\x1b[2m  provider  (↑↓ move · ⏎ pick · esc cancel)\x1b[0m\r\n";
+    int lines = 1;
+
+    for (size_t i = 0; i < providers.size(); ++i) {
+      bool isCurrent = (providers[i] == current);
+      std::string label = std::string("  ") + (isCurrent ? "* " : "  ") + providers[i];
+      if (static_cast<int>(i) == selected) {
+        std::cout << "\x1b[7m" << label << "\x1b[0m\r\n";
+      } else if (isCurrent) {
+        std::cout << "\x1b[1m" << label << "\x1b[0m\r\n";
+      } else {
+        std::cout << label << "\r\n";
+      }
+      ++lines;
+    }
+    prevLines = lines;
+    std::cout.flush();
+
+    char ch = 0;
+    Key k = readKey(ch);
+    switch (k) {
+    case Key::Up:
+      if (selected > 0) {
+        --selected;
+      }
+      break;
+    case Key::Down:
+      if (selected + 1 < static_cast<int>(providers.size())) {
+        ++selected;
+      }
+      break;
+    case Key::Enter:
+      result = providers[selected];
+      done = true;
+      break;
+    case Key::Escape:
+    case Key::CtrlC:
+    case Key::CtrlD:
+      done = true; // cancel, result stays empty
+      break;
+    default:
+      break;
+    }
+  }
+
+  clearMenu();
+  std::cout << "\x1b[?25h"; // show cursor
+  std::cout.flush();
+  return result;
+}
+
 // Redraw the input line: carriage return, clear line, prompt + buffer, then
 // place the terminal cursor at `cursor` within the buffer.
 void redrawLine(const std::string& prompt, const std::string& buf, size_t cursor) {
@@ -566,6 +651,31 @@ bool Commander::handle(std::string input, Conversation &conversation,
   }
   if (input == "save") {
     storage.save(conversation);
+    return true;
+  }
+
+  if (input == "/provider") {
+    static const std::vector<std::string> kProviders = {"openrouter", "ollama"};
+    std::string current = provider.getCurrentProvider().getName();
+    std::string picked = providerPicker(kProviders, current);
+    if (picked.empty() || picked == current) {
+      return true;
+    }
+
+    if (picked == "openrouter") {
+      provider.registerProvider(std::make_shared<OpenRouter>());
+    } else if (picked == "ollama") {
+      provider.registerProvider(std::make_shared<Ollama>());
+    }
+    std::cout << "Provider set: " << picked << std::endl;
+
+    // Pick a starting model on the new gateway so the user isn't left with
+    // an empty model until they run /model themselves.
+    std::vector<std::string> models = provider.getCurrentProvider().getModels();
+    if (!models.empty()) {
+      provider.setModel(models.front());
+      std::cout << "Model set: " << models.front() << std::endl;
+    }
     return true;
   }
 

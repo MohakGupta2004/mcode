@@ -5,6 +5,7 @@
 
 # Common build directories
 /build*/
+/compile_commands.json
 
 # CI jobs that run in symlinked trees produce these artifacts.
 /real_work/
