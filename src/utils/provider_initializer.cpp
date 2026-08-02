@@ -19,7 +19,7 @@ void initializeProviders(ProviderManager& provider) {
   std::string model = kFallbackModel;
   if (!models.empty()) {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
-    int maxIndex = std::min<int>(static_cast<int>(models.size()) - 1, 3);
+    int maxIndex = std::min<int>(static_cast<int>(models.size()) - 1, 1);
     int index = std::rand() % (maxIndex + 1);
     model = models[index];
   }
