@@ -39,6 +39,9 @@ int main() {
       });
       std::pair<std::string, std::string> response = provider.getCurrentProvider().ask(conversation.getMessage(), config, tool_manager);
       conversation.addMessage({"assistant", response.first});
+      // Persist after every turn instead of only on the explicit "save"
+      // command, so a later crash or a plain exit never loses history.
+      storage.save(conversation);
     }
     return 0;
 }

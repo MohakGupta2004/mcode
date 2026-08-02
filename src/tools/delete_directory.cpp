@@ -1,5 +1,6 @@
 #include "delete_directory.h"
 #include <iostream>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -13,7 +14,10 @@ std::string DeleteDirectory::execute(nlohmann::json &arguements) {
 
   std::cout << "Delete directory '" << path << "' and all its contents? (y/n): ";
   char answer = 'n';
-  std::cin >> answer;
+  if (!(std::cin >> answer)) {
+    std::cin.clear();
+  }
+  std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
   if (answer != 'y' && answer != 'Y') {
     return "Deletion cancelled by user for directory: " + path;

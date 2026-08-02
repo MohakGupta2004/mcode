@@ -5,14 +5,45 @@
 #include <string>
 #include <cstdlib>
 #include <iostream>
+#include <filesystem>
+#include <unistd.h>
+#include <chrono>
 #include <nlohmann/json.hpp>
+
+namespace {
+// Count non-overlapping occurrences of `needle` in `haystack`.
+size_t countOccurrences(const std::string& haystack, const std::string& needle) {
+  size_t count = 0;
+  size_t pos = 0;
+  while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+    ++count;
+    pos += needle.length();
+  }
+  return count;
+}
+} // namespace
+
 std::string EditFile::execute(nlohmann::json &arguements) {
-  std::string path = arguements["path"];
-  std::string oldString = arguements["oldString"];
-  std::string newString = arguements["newString"];
+  if (!arguements.contains("path") || !arguements["path"].is_string()) {
+    return "Error: missing required string argument 'path'";
+  }
+  if (!arguements.contains("oldString") || !arguements["oldString"].is_string()) {
+    return "Error: missing required string argument 'oldString'";
+  }
+  if (!arguements.contains("newString") || !arguements["newString"].is_string()) {
+    return "Error: missing required string argument 'newString'";
+  }
+
+  std::string path = arguements["path"].get<std::string>();
+  std::string oldString = arguements["oldString"].get<std::string>();
+  std::string newString = arguements["newString"].get<std::string>();
   bool replaceAll = false;
   if (arguements.contains("replaceAll")) {
     replaceAll = arguements["replaceAll"];
+  }
+
+  if (oldString.empty()) {
+    return "Error: oldString must not be empty.";
   }
 
   std::ifstream file(path);
@@ -23,12 +54,20 @@ std::string EditFile::execute(nlohmann::json &arguements) {
   std::string content((std::istreambuf_iterator<char>(file)),
                       (std::istreambuf_iterator<char>()));
   file.close();
-  std::ofstream originalFile("/tmp/original_file.txt");
-  originalFile << content;
-  originalFile.close();
+
   size_t pos = content.find(oldString);
   if (pos == std::string::npos) {
     return "Error: Old string not found in the file.";
+  }
+
+  if (!replaceAll) {
+    size_t occurrences = countOccurrences(content, oldString);
+    if (occurrences > 1) {
+      return "Error: oldString is not unique in the file (" +
+             std::to_string(occurrences) +
+             " occurrences). Provide more surrounding context to make it "
+             "unique, or pass replaceAll=true.";
+    }
   }
 
   if (replaceAll) {
@@ -40,17 +79,31 @@ std::string EditFile::execute(nlohmann::json &arguements) {
     content.replace(pos, oldString.length(), newString);
   }
 
+  // Unique-per-process temp file names so concurrent runs/tools never collide.
+  std::filesystem::path tmpDir = std::filesystem::temp_directory_path();
+  auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+  std::string suffix = std::to_string(::getpid()) + "_" + std::to_string(now);
+  std::filesystem::path originalPath = tmpDir / ("claude_cpp_original_" + suffix + ".txt");
+  std::filesystem::path modifiedPath = tmpDir / ("claude_cpp_modified_" + suffix + ".txt");
 
-  std::ofstream modifiedFile("/tmp/modified_file.txt");
+  std::ifstream origForDiff(path);
+  std::string originalContent((std::istreambuf_iterator<char>(origForDiff)),
+                              (std::istreambuf_iterator<char>()));
+  origForDiff.close();
+
+  std::ofstream originalFile(originalPath);
+  originalFile << originalContent;
+  originalFile.close();
+
+  std::ofstream modifiedFile(modifiedPath);
   modifiedFile << content;
   modifiedFile.close();
 
-  auto patch = std::string("git --no-pager diff --no-index --color=always --no-prefix -- /tmp/original_file.txt /tmp/modified_file.txt | sed '1,2d'");
+  auto patch = std::string("git --no-pager diff --no-index --color=always --no-prefix -- ") +
+               originalPath.string() + " " + modifiedPath.string() + " | sed '1,2d'";
   std::system(patch.c_str());
-  auto removeOriginal = std::string("rm /tmp/original_file.txt");
-  std::system(removeOriginal.c_str());
-  auto removeModified = std::string("rm /tmp/modified_file.txt");
-  std::system(removeModified.c_str());
+  std::filesystem::remove(originalPath);
+  std::filesystem::remove(modifiedPath);
 
   std::ofstream outFile(path);
   if (!outFile.is_open()) {

@@ -1,6 +1,7 @@
 #include "command_executor.h"
 #include <array>
 #include <iostream>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 std::string CommandExecutor::execute(nlohmann::json &arguements) {
@@ -14,7 +15,10 @@ std::string CommandExecutor::execute(nlohmann::json &arguements) {
   // auto-approve mode yet; that's a future toggle, not a default.
   std::cout << "Run command '" << command << "'? (y/n): ";
   char answer = 'n';
-  std::cin >> answer;
+  if (!(std::cin >> answer)) {
+    std::cin.clear();
+  }
+  std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
   if (answer != 'y' && answer != 'Y') {
     return "Command execution cancelled by user: " + command;

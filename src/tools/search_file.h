@@ -19,7 +19,7 @@ class SearchFile : public Tool {
         }},
         {"pattern", {
           {"type", "string"},
-          {"description", "Regex pattern to search for"}
+          {"description", "Shell-style glob pattern to match against the filename only (not the full path), e.g. '*.cpp', 'config.*', 'test_*'."}
         }}
       }},
       {"required", {"path", "pattern"}}

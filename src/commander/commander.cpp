@@ -21,10 +21,15 @@ namespace {
 
 // RAII guard: put the terminal in raw mode (no echo, no line buffering) for the
 // lifetime of the object and restore the previous settings on destruction, even
-// if an exception unwinds through us.
+// if an exception unwinds through us. Optionally also turns on the terminal's
+// bracketed-paste mode, which wraps a pasted block in ESC[200~ ... ESC[201~ so
+// the reader can tell "user pasted text containing newlines" apart from "user
+// pressed Enter N times" - without it every embedded newline in a paste looks
+// like a real Enter and submits the line early.
 class RawMode {
 public:
-  RawMode() : ok_(false) {
+  explicit RawMode(bool bracketedPaste = false)
+      : ok_(false), pasteEnabled_(false) {
     if (tcgetattr(STDIN_FILENO, &orig_) == -1) {
       return;
     }
@@ -36,8 +41,15 @@ public:
       return;
     }
     ok_ = true;
+    if (bracketedPaste) {
+      std::cout << "\x1b[?2004h" << std::flush;
+      pasteEnabled_ = true;
+    }
   }
   ~RawMode() {
+    if (pasteEnabled_) {
+      std::cout << "\x1b[?2004l" << std::flush;
+    }
     if (ok_) {
       tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_);
     }
@@ -47,6 +59,7 @@ public:
 private:
   termios orig_{};
   bool ok_;
+  bool pasteEnabled_;
 };
 
 enum class Key {
@@ -61,10 +74,13 @@ enum class Key {
   Tab,
   CtrlC,
   CtrlD,
+  PasteStart,
+  PasteEnd,
   Unknown,
 };
 
-// Read one logical keypress, decoding ANSI escape sequences for arrow keys.
+// Read one logical keypress, decoding ANSI escape/CSI sequences: arrow keys
+// (ESC[A/B/C/D) and bracketed-paste markers (ESC[200~ start, ESC[201~ end).
 Key readKey(char& out) {
   char c;
   if (read(STDIN_FILENO, &c, 1) != 1) {
@@ -84,34 +100,98 @@ Key readKey(char& out) {
   case 4:
     return Key::CtrlD;
   case 27: { // ESC or CSI sequence
-    char seq[2];
-    if (read(STDIN_FILENO, &seq[0], 1) != 1) {
+    char seq0;
+    if (read(STDIN_FILENO, &seq0, 1) != 1) {
       return Key::Escape;
     }
-    if (seq[0] != '[' && seq[0] != 'O') {
-      out = seq[0];
+    if (seq0 == 'O') {
+      char c2;
+      if (read(STDIN_FILENO, &c2, 1) != 1) {
+        return Key::Escape;
+      }
+      switch (c2) {
+      case 'A': return Key::Up;
+      case 'B': return Key::Down;
+      case 'C': return Key::Right;
+      case 'D': return Key::Left;
+      default: return Key::Unknown;
+      }
+    }
+    if (seq0 != '[') {
+      out = seq0;
       return Key::Escape;
     }
-    if (read(STDIN_FILENO, &seq[1], 1) != 1) {
-      return Key::Escape;
+    // CSI sequence: collect numeric parameter bytes up to the final byte.
+    std::string params;
+    char fin;
+    while (true) {
+      if (read(STDIN_FILENO, &fin, 1) != 1) {
+        return Key::Escape;
+      }
+      if (fin >= '0' && fin <= '9') {
+        params += fin;
+        continue;
+      }
+      break;
     }
-    switch (seq[1]) {
-    case 'A':
-      return Key::Up;
-    case 'B':
-      return Key::Down;
-    case 'C':
-      return Key::Right;
-    case 'D':
-      return Key::Left;
-    default:
+    if (fin == '~') {
+      if (params == "200") return Key::PasteStart;
+      if (params == "201") return Key::PasteEnd;
       return Key::Unknown;
+    }
+    switch (fin) {
+    case 'A': return Key::Up;
+    case 'B': return Key::Down;
+    case 'C': return Key::Right;
+    case 'D': return Key::Left;
+    default: return Key::Unknown;
     }
   }
   default:
     out = c;
     return Key::Char;
   }
+}
+
+// Consume raw bytes up to and including the ESC[201~ bracketed-paste end
+// marker, returning everything in between. Embedded CR/LF bytes are folded to
+// a single space so the pasted text stays a single logical line (the input
+// buffer/redraw model here doesn't support multi-line editing).
+std::string readPastedText() {
+  std::string pasted;
+  char c;
+  while (read(STDIN_FILENO, &c, 1) == 1) {
+    if (c == '\r' || c == '\n') {
+      if (pasted.empty() || pasted.back() != ' ') {
+        pasted += ' ';
+      }
+      continue;
+    }
+    if (c == 27) {
+      char seq0;
+      if (read(STDIN_FILENO, &seq0, 1) == 1 && seq0 == '[') {
+        std::string params;
+        char fin;
+        bool matchedEnd = false;
+        while (read(STDIN_FILENO, &fin, 1) == 1) {
+          if (fin >= '0' && fin <= '9') {
+            params += fin;
+            continue;
+          }
+          matchedEnd = (fin == '~' && params == "201");
+          break;
+        }
+        if (matchedEnd) {
+          break;
+        }
+        // Not the end marker - drop it rather than corrupt the pasted text.
+        continue;
+      }
+      continue;
+    }
+    pasted += c;
+  }
+  return pasted;
 }
 
 struct Entry {
@@ -547,7 +627,7 @@ void redrawLine(const std::string& prompt, const std::string& buf, size_t cursor
 // ---------------------------------------------------------------------------
 std::string Commander::readLine(const std::string& prompt, bool& eof) {
   eof = false;
-  RawMode raw;
+  RawMode raw(/*bracketedPaste=*/true);
   if (!raw.ok()) {
     // Not a tty (e.g. piped input) -> fall back to plain line reading.
     std::cout << prompt;
@@ -603,6 +683,21 @@ std::string Commander::readLine(const std::string& prompt, bool& eof) {
         ++cursor;
         redrawLine(prompt, buf, cursor);
       }
+      break;
+    case Key::PasteStart: {
+      // Insert the whole pasted block at once - embedded newlines were
+      // already folded to spaces by readPastedText, so this can't trigger
+      // Enter (early submit) or re-print the prompt line by line.
+      std::string pasted = readPastedText();
+      if (!pasted.empty()) {
+        buf.insert(cursor, pasted);
+        cursor += pasted.size();
+        redrawLine(prompt, buf, cursor);
+      }
+      break;
+    }
+    case Key::PasteEnd:
+      // Stray end marker with no matching start - ignore.
       break;
     case Key::Char:
       if (ch == '@') {
