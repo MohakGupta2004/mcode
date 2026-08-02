@@ -12,7 +12,17 @@
 #include "utils/provider_initializer.h"
 #include <cpr/cpr.h>
 #include <utility>
+static void printBanner() {
+    std::cout <<
+        "  __  __  ____ ___  ____  _____\n"
+        " |  \\/  |/ ___/ _ \\|  _ \\| ____|\n"
+        " | |\\/| | |  | | | | | | |  _|\n"
+        " | |  | | |__| |_| | |_| | |___\n"
+        " |_|  |_|\\____\\___/|____/|_____|\n\n";
+}
+
 int main() {
+    printBanner();
     Conversation conversation;
     Storage storage;
     Commander handler;

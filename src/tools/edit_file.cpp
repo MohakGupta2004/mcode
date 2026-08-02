@@ -83,8 +83,8 @@ std::string EditFile::execute(nlohmann::json &arguements) {
   std::filesystem::path tmpDir = std::filesystem::temp_directory_path();
   auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
   std::string suffix = std::to_string(::getpid()) + "_" + std::to_string(now);
-  std::filesystem::path originalPath = tmpDir / ("claude_cpp_original_" + suffix + ".txt");
-  std::filesystem::path modifiedPath = tmpDir / ("claude_cpp_modified_" + suffix + ".txt");
+  std::filesystem::path originalPath = tmpDir / ("mcode_original_" + suffix + ".txt");
+  std::filesystem::path modifiedPath = tmpDir / ("mcode_modified_" + suffix + ".txt");
 
   std::ifstream origForDiff(path);
   std::string originalContent((std::istreambuf_iterator<char>(origForDiff)),

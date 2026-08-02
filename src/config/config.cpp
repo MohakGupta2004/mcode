@@ -25,7 +25,7 @@ void Config::load() {
     }
 
     fs::path configDir =
-        fs::path(home) / ".config" / "claude_cpp";
+        fs::path(home) / ".config" / "mcode";
 
     fs::path filepath =
         configDir / "config.json";
