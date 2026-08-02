@@ -8,11 +8,32 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #include <vector>
 
 namespace fs = std::filesystem;
+
+// ---------------------------------------------------------------------------
+// Color palette (ANSI SGR codes). Kept as plain escape strings rather than a
+// theming system since this is a single small CLI, not a library.
+// ---------------------------------------------------------------------------
+namespace Color {
+constexpr const char* Reset = "\x1b[0m";
+constexpr const char* Bold = "\x1b[1m";
+constexpr const char* Dim = "\x1b[2m";
+constexpr const char* Red = "\x1b[31m";
+constexpr const char* Green = "\x1b[32m";
+constexpr const char* Yellow = "\x1b[33m";
+constexpr const char* Blue = "\x1b[34m";
+constexpr const char* Magenta = "\x1b[35m";
+constexpr const char* Cyan = "\x1b[36m";
+constexpr const char* Gray = "\x1b[90m";
+constexpr const char* BoldGreen = "\x1b[1;32m";
+constexpr const char* BoldCyan = "\x1b[1;36m";
+constexpr const char* BoldRed = "\x1b[1;31m";
+} // namespace Color
 
 // ---------------------------------------------------------------------------
 // Raw terminal helpers
@@ -34,7 +55,11 @@ public:
       return;
     }
     termios raw = orig_;
-    raw.c_lflag &= ~(ECHO | ICANON);
+    // ISIG must go too: without it, a real terminal turns Ctrl-C into SIGINT
+    // (default-terminating the whole program) before it ever reaches readKey,
+    // so the Key::CtrlC handling below - which just clears the current line -
+    // never actually runs.
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG);
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
@@ -66,6 +91,7 @@ enum class Key {
   Char,
   Enter,
   Backspace,
+  AltBackspace,
   Up,
   Down,
   Left,
@@ -116,6 +142,12 @@ Key readKey(char& out) {
       case 'D': return Key::Left;
       default: return Key::Unknown;
       }
+    }
+    // macOS Terminal/iTerm send ESC followed by DEL (or BS) for Option-Backspace
+    // ("delete word left") when Option is bound as the Meta key - the default
+    // on both apps' built-in profiles.
+    if (seq0 == 127 || seq0 == 8) {
+      return Key::AltBackspace;
     }
     if (seq0 != '[') {
       out = seq0;
@@ -274,8 +306,10 @@ std::string filePicker() {
 
     clearMenu();
 
-    std::string header = "\x1b[2m  @" + base + filter +
-                         "  (↑↓ move · → open · ⏎/space pick · esc cancel)\x1b[0m\r\n";
+    std::string header = std::string("  ") + Color::Cyan + "@" + base + Color::Bold +
+                         Color::Cyan + filter + Color::Reset + Color::Dim +
+                         "  (↑↓ move · → open · ⏎/space pick · esc cancel)" +
+                         Color::Reset + "\r\n";
     std::cout << header;
     int lines = 1;
 
@@ -286,16 +320,18 @@ std::string filePicker() {
     int last = std::min(static_cast<int>(entries.size()), first + kWindow);
     for (int i = first; i < last; ++i) {
       const Entry& e = entries[i];
-      std::string label = "  "+ e.name + (e.is_dir ? "/" : "");
+      std::string name = e.is_dir ? (std::string(Color::Blue) + Color::Bold + e.name + "/" + Color::Reset)
+                                   : e.name;
+      std::string label = "  " + name;
       if (i == selected) {
-        std::cout << "\x1b[7m" << label << "\x1b[0m\r\n"; // reverse video
+        std::cout << "\x1b[7m  " << (e.is_dir ? e.name + "/" : e.name) << "\x1b[0m\r\n"; // reverse video
       } else {
         std::cout << label << "\r\n";
       }
       ++lines;
     }
     if (entries.empty()) {
-      std::cout << "\x1b[2m  (no matches)\x1b[0m\r\n";
+      std::cout << "  " << Color::Yellow << "(no matches)" << Color::Reset << "\r\n";
       ++lines;
     }
     prevLines = lines;
@@ -453,8 +489,9 @@ std::string modelPicker(const std::vector<std::string>& models,
 
     clearMenu();
 
-    std::cout << "\x1b[2m  model: " << (filter.empty() ? "" : filter)
-              << "  (↑↓ move · ⏎ pick · esc cancel)\x1b[0m\r\n";
+    std::cout << "  " << Color::Dim << "model " << Color::Reset << Color::Bold
+              << Color::Cyan << filter << Color::Reset << Color::Dim
+              << "  (↑↓ move · ⏎ pick · esc cancel)" << Color::Reset << "\r\n";
     int lines = 1;
 
     int first = 0;
@@ -465,18 +502,19 @@ std::string modelPicker(const std::vector<std::string>& models,
     for (int i = first; i < last; ++i) {
       const std::string& m = *view[i];
       bool isCurrent = (m == current);
-      std::string label = std::string("  ") + (isCurrent ? "* " : "  ") + m;
+      std::string marker = isCurrent ? (std::string(Color::Green) + "* " + Color::Reset) : "  ";
+      std::string label = std::string("  ") + marker + m;
       if (i == selected) {
-        std::cout << "\x1b[7m" << label << "\x1b[0m\r\n"; // reverse video
+        std::cout << "\x1b[7m  " << (isCurrent ? "* " : "  ") << m << "\x1b[0m\r\n"; // reverse video
       } else if (isCurrent) {
-        std::cout << "\x1b[1m" << label << "\x1b[0m\r\n"; // bold current
+        std::cout << "  " << Color::BoldGreen << "* " << m << Color::Reset << "\r\n";
       } else {
         std::cout << label << "\r\n";
       }
       ++lines;
     }
     if (view.empty()) {
-      std::cout << "\x1b[2m  (no matches)\x1b[0m\r\n";
+      std::cout << "  " << Color::Yellow << "(no matches)" << Color::Reset << "\r\n";
       ++lines;
     }
     prevLines = lines;
@@ -558,7 +596,8 @@ std::string providerPicker(const std::vector<std::string>& providers,
   while (!done) {
     clearMenu();
 
-    std::cout << "\x1b[2m  provider  (↑↓ move · ⏎ pick · esc cancel)\x1b[0m\r\n";
+    std::cout << "  " << Color::Dim << "provider  (↑↓ move · ⏎ pick · esc cancel)"
+              << Color::Reset << "\r\n";
     int lines = 1;
 
     for (size_t i = 0; i < providers.size(); ++i) {
@@ -567,7 +606,7 @@ std::string providerPicker(const std::vector<std::string>& providers,
       if (static_cast<int>(i) == selected) {
         std::cout << "\x1b[7m" << label << "\x1b[0m\r\n";
       } else if (isCurrent) {
-        std::cout << "\x1b[1m" << label << "\x1b[0m\r\n";
+        std::cout << "  " << Color::BoldGreen << "* " << providers[i] << Color::Reset << "\r\n";
       } else {
         std::cout << label << "\r\n";
       }
@@ -609,14 +648,85 @@ std::string providerPicker(const std::vector<std::string>& providers,
   return result;
 }
 
-// Redraw the input line: carriage return, clear line, prompt + buffer, then
-// place the terminal cursor at `cursor` within the buffer.
-void redrawLine(const std::string& prompt, const std::string& buf, size_t cursor) {
-  std::cout << "\r\x1b[K" << prompt << buf;
-  size_t tail = buf.size() - cursor;
-  if (tail > 0) {
-    std::cout << "\x1b[" << tail << "D";
+// Every command Commander::handle (or main's "exit" check) recognizes. Drives
+// both the inline ghost suggestion shown while typing and the auto-expand on
+// Enter for slash commands.
+const std::vector<std::string> kKnownCommands = {
+    "exit", "history", "clear", "save", "/provider", "/model",
+};
+
+// If `buf` is a non-empty, strict prefix of exactly one known command, return
+// that command; otherwise "" (no match, or too ambiguous to guess).
+std::string findUniqueSuggestion(const std::string& buf) {
+  if (buf.empty()) {
+    return "";
   }
+  std::string match;
+  int matches = 0;
+  for (const auto& cmd : kKnownCommands) {
+    if (cmd.size() > buf.size() && cmd.compare(0, buf.size(), buf) == 0) {
+      match = cmd;
+      ++matches;
+    }
+  }
+  return matches == 1 ? match : "";
+}
+
+// Current terminal width in columns, falling back to 80 if it can't be read
+// (e.g. output redirected to a file).
+int termWidth() {
+  struct winsize ws{};
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
+    return ws.ws_col;
+  }
+  return 80;
+}
+
+// Redraw the input line: prompt + buffer + (optionally) a dim inline
+// suggestion for the one command `buf` could be completing, then place the
+// terminal cursor at `cursor` within the buffer (never inside the
+// suggestion - it's a preview, not part of the line).
+//
+// `prevVisibleLen` is the on-screen character count (prompt+buf+ghost) from
+// the previous call, threaded through by the caller across a whole readLine()
+// session. It lets us find how many terminal rows the previous render wrapped
+// across, so a long line that spills onto a second row gets fully erased
+// before redrawing - a plain "\r\x1b[K" only clears the row the cursor is
+// currently on, leaving stale characters on the row(s) above it once the
+// buffer shrinks or the cursor moves back across a wrap boundary.
+void redrawLine(const std::string& prompt, const std::string& buf, size_t cursor,
+                size_t& prevVisibleLen) {
+  int width = termWidth();
+  // findUniqueSuggestion returns the whole matching command; only the part
+  // beyond what's already typed should render as the ghost.
+  std::string suggestion = (cursor == buf.size()) ? findUniqueSuggestion(buf) : "";
+  std::string ghost = suggestion.empty() ? "" : suggestion.substr(buf.size());
+
+  size_t prevRows = (width > 0 && prevVisibleLen > 0) ? (prevVisibleLen - 1) / width : 0;
+  if (prevRows > 0) {
+    std::cout << "\x1b[" << prevRows << "A"; // up to the first row we rendered
+  }
+  std::cout << "\r\x1b[J"; // clear that row and everything below it
+
+  std::cout << Color::BoldCyan << prompt << Color::Reset << buf;
+  if (!ghost.empty()) {
+    std::cout << Color::Gray << ghost << Color::Reset;
+  }
+
+  size_t visibleLen = prompt.size() + buf.size() + ghost.size();
+  size_t cursorPos = prompt.size() + cursor;
+  size_t afterPrintRow = width > 0 ? visibleLen / width : 0;
+  size_t targetRow = width > 0 ? cursorPos / width : 0;
+  size_t targetCol = width > 0 ? cursorPos % width : cursorPos;
+  if (afterPrintRow > targetRow) {
+    std::cout << "\x1b[" << (afterPrintRow - targetRow) << "A";
+  }
+  std::cout << "\r";
+  if (targetCol > 0) {
+    std::cout << "\x1b[" << targetCol << "C";
+  }
+
+  prevVisibleLen = visibleLen;
   std::cout.flush();
 }
 
@@ -627,10 +737,15 @@ void redrawLine(const std::string& prompt, const std::string& buf, size_t cursor
 // ---------------------------------------------------------------------------
 std::string Commander::readLine(const std::string& prompt, bool& eof) {
   eof = false;
+  // Reset history browsing for this call: start past the newest entry (i.e.
+  // showing a fresh draft), same as a shell resetting its cursor after Enter.
+  historyIndex_ = history_.size();
+  draft_.clear();
+
   RawMode raw(/*bracketedPaste=*/true);
   if (!raw.ok()) {
     // Not a tty (e.g. piped input) -> fall back to plain line reading.
-    std::cout << prompt;
+    std::cout << Color::BoldCyan << prompt << Color::Reset;
     std::cout.flush();
     std::string line;
     if (!std::getline(std::cin, line)) {
@@ -641,16 +756,39 @@ std::string Commander::readLine(const std::string& prompt, bool& eof) {
 
   std::string buf;
   size_t cursor = 0;
-  redrawLine(prompt, buf, cursor);
+  // On-screen length (prompt+buf+ghost) from the last redraw, so redrawLine
+  // can tell whether the previous render wrapped onto extra terminal rows
+  // and needs to clear them too. Reset to 0 here since nothing's drawn yet.
+  size_t visibleLen = 0;
+  redrawLine(prompt, buf, cursor, visibleLen);
 
   while (true) {
     char ch = 0;
     Key k = readKey(ch);
     switch (k) {
-    case Key::Enter:
+    case Key::Enter: {
+      // Auto-complete an unambiguous slash command on submit (e.g. "/p" ->
+      // "/provider"). Restricted to '/' input: a leading slash is an
+      // unambiguous "this is a command" signal, whereas guessing at a bare
+      // word (e.g. turning a one-letter chat message into "clear") could
+      // silently swallow real chat text the user meant to send as-is.
+      if (!buf.empty() && buf[0] == '/') {
+        std::string suggestion = findUniqueSuggestion(buf);
+        if (!suggestion.empty()) {
+          buf = suggestion;
+          std::cout << Color::Dim << " -> " << Color::Reset << Color::Bold
+                    << buf << Color::Reset;
+        }
+      }
       std::cout << "\r\n";
       std::cout.flush();
+      // Remember this line for Up/Down recall, skipping blanks and immediate
+      // repeats so hammering Enter or Up doesn't pile up duplicate entries.
+      if (!buf.empty() && (history_.empty() || history_.back() != buf)) {
+        history_.push_back(buf);
+      }
       return buf;
+    }
     case Key::CtrlD:
       if (buf.empty()) {
         eof = true;
@@ -662,26 +800,84 @@ std::string Commander::readLine(const std::string& prompt, bool& eof) {
     case Key::CtrlC:
       buf.clear();
       cursor = 0;
-      std::cout << "^C\r\n";
-      redrawLine(prompt, buf, cursor);
+      historyIndex_ = history_.size();
+      std::cout << Color::Red << "^C" << Color::Reset << "\r\n";
+      visibleLen = 0;
+      redrawLine(prompt, buf, cursor, visibleLen);
       break;
     case Key::Backspace:
       if (cursor > 0) {
         buf.erase(cursor - 1, 1);
         --cursor;
-        redrawLine(prompt, buf, cursor);
+        redrawLine(prompt, buf, cursor, visibleLen);
+      }
+      break;
+    case Key::AltBackspace:
+      // Option-Backspace: delete the word behind the cursor, same as
+      // readline's unix-word-rubout - skip trailing spaces first, then the
+      // run of non-space characters before them.
+      if (cursor > 0) {
+        size_t start = cursor;
+        while (start > 0 && buf[start - 1] == ' ') {
+          --start;
+        }
+        while (start > 0 && buf[start - 1] != ' ') {
+          --start;
+        }
+        buf.erase(start, cursor - start);
+        cursor = start;
+        redrawLine(prompt, buf, cursor, visibleLen);
       }
       break;
     case Key::Left:
       if (cursor > 0) {
         --cursor;
-        redrawLine(prompt, buf, cursor);
+        redrawLine(prompt, buf, cursor, visibleLen);
       }
       break;
     case Key::Right:
       if (cursor < buf.size()) {
         ++cursor;
-        redrawLine(prompt, buf, cursor);
+        redrawLine(prompt, buf, cursor, visibleLen);
+      } else {
+        // At end-of-line with nothing to move into: accept the inline
+        // suggestion instead, the same way fish/zsh autosuggestions work.
+        std::string suggestion = findUniqueSuggestion(buf);
+        if (!suggestion.empty()) {
+          buf = suggestion;
+          cursor = buf.size();
+          redrawLine(prompt, buf, cursor, visibleLen);
+        }
+      }
+      break;
+    case Key::Tab: {
+      std::string suggestion = findUniqueSuggestion(buf);
+      if (!suggestion.empty()) {
+        buf = suggestion;
+        cursor = buf.size();
+        redrawLine(prompt, buf, cursor, visibleLen);
+      }
+      break;
+    }
+    case Key::Up:
+      // Step back one entry in history, stashing the in-progress line first
+      // so Down can bring it back once we return to the bottom.
+      if (historyIndex_ > 0) {
+        if (historyIndex_ == history_.size()) {
+          draft_ = buf;
+        }
+        --historyIndex_;
+        buf = history_[historyIndex_];
+        cursor = buf.size();
+        redrawLine(prompt, buf, cursor, visibleLen);
+      }
+      break;
+    case Key::Down:
+      if (historyIndex_ < history_.size()) {
+        ++historyIndex_;
+        buf = (historyIndex_ == history_.size()) ? draft_ : history_[historyIndex_];
+        cursor = buf.size();
+        redrawLine(prompt, buf, cursor, visibleLen);
       }
       break;
     case Key::PasteStart: {
@@ -692,7 +888,7 @@ std::string Commander::readLine(const std::string& prompt, bool& eof) {
       if (!pasted.empty()) {
         buf.insert(cursor, pasted);
         cursor += pasted.size();
-        redrawLine(prompt, buf, cursor);
+        redrawLine(prompt, buf, cursor, visibleLen);
       }
       break;
     }
@@ -703,22 +899,29 @@ std::string Commander::readLine(const std::string& prompt, bool& eof) {
       if (ch == '@') {
         buf.insert(cursor, 1, '@');
         ++cursor;
-        std::cout << "\r\n"; // open modal one line below the input line
+        // Open the modal below the input line, accounting for the input
+        // having wrapped onto more than one terminal row.
+        int width = termWidth();
+        size_t rows = width > 0 ? (prompt.size() + buf.size() - 1) / width : 0;
+        for (size_t i = 0; i < rows + 1; ++i) {
+          std::cout << "\r\n";
+        }
         std::cout.flush();
         std::string picked = filePicker();
-        // filePicker leaves the cursor on the line where its menu began (one
-        // below the prompt). Step back up so we redraw over the original prompt
-        // line instead of duplicating it below.
-        std::cout << "\x1b[1A";
+        // filePicker leaves the cursor on the line where its menu began.
+        // Step back up so we redraw over the original prompt line(s) instead
+        // of duplicating them below.
+        std::cout << "\x1b[" << (rows + 1) << "A";
         if (!picked.empty()) {
           buf.insert(cursor, picked);
           cursor += picked.size();
         }
-        redrawLine(prompt, buf, cursor);
+        visibleLen = 0;
+        redrawLine(prompt, buf, cursor, visibleLen);
       } else {
         buf.insert(cursor, 1, ch);
         ++cursor;
-        redrawLine(prompt, buf, cursor);
+        redrawLine(prompt, buf, cursor, visibleLen);
       }
       break;
     default:
@@ -762,14 +965,16 @@ bool Commander::handle(std::string input, Conversation &conversation,
     } else if (picked == "ollama") {
       provider.registerProvider(std::make_shared<Ollama>());
     }
-    std::cout << "Provider set: " << picked << std::endl;
+    std::cout << Color::Green << "✓ " << Color::Reset << "Provider set: "
+              << Color::Bold << picked << Color::Reset << std::endl;
 
     // Pick a starting model on the new gateway so the user isn't left with
     // an empty model until they run /model themselves.
     std::vector<std::string> models = provider.getCurrentProvider().getModels();
     if (!models.empty()) {
       provider.setModel(models.front());
-      std::cout << "Model set: " << models.front() << std::endl;
+      std::cout << Color::Green << "✓ " << Color::Reset << "Model set: "
+                << Color::Bold << models.front() << Color::Reset << std::endl;
     }
     return true;
   }
@@ -784,29 +989,31 @@ bool Commander::handle(std::string input, Conversation &conversation,
       arg.erase(std::find_if(arg.rbegin(), arg.rend(), notSpace).base(), arg.end());
       if (!arg.empty()) {
         provider.setModel(arg);
-        std::cout << "Model set: " << arg << std::endl;
+        std::cout << Color::Green << "✓ " << Color::Reset << "Model set: "
+                  << Color::Bold << arg << Color::Reset << std::endl;
         return true;
       }
 
       // Bare "/model": open the interactive picker.
-      std::cout << "Loading models..." << std::flush;
+      std::cout << Color::Dim << "Loading models..." << Color::Reset << std::flush;
       std::vector<std::string> models = provider.getCurrentProvider().getModels();
       std::cout << "\r\x1b[K"; // wipe the loading line
       if (models.empty()) {
-        std::cout << "No models available." << std::endl;
+        std::cout << Color::Yellow << "No models available." << Color::Reset << std::endl;
         return true;
       }
       std::string current = provider.getCurrentProvider().getModel();
       std::string picked = modelPicker(models, current);
       if (!picked.empty()) {
         provider.setModel(picked);
-        std::cout << "Model set: " << picked << std::endl;
+        std::cout << Color::Green << "✓ " << Color::Reset << "Model set: "
+                  << Color::Bold << picked << Color::Reset << std::endl;
       }
       return true;
     } catch (const std::out_of_range& e) {
       return true;
     } catch (const std::runtime_error& e) {
-      std::cout << e.what() << std::endl;
+      std::cout << Color::Red << "✗ " << Color::Reset << e.what() << std::endl;
       return true;
     }
   }

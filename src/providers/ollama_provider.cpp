@@ -1,4 +1,6 @@
 #include "ollama_provider.h"
+#include "../utils/markdown_stream.h"
+#include "../utils/spinner.h"
 #include <cpr/cpr.h>
 #include <cpr/response.h>
 #include <cstddef>
@@ -42,8 +44,12 @@ Ollama::ask(const std::vector<Message> &history, Config &config, ToolManager& to
   std::string lineBuffer;
   std::string rawBuffer; // raw bytes, for error reporting (WriteCallback bypasses r.text)
   json toolCallsAccum = json::array();
+  Spinner spinner;
+  MarkdownStream markdown;
 
   auto write_callback = [&](const std::string_view &data, intptr_t) -> bool {
+    // First byte of the response: whatever wait there was is over.
+    spinner.stop();
     rawBuffer += data;
     lineBuffer += data;
     size_t pos;
@@ -61,7 +67,9 @@ Ollama::ask(const std::vector<Message> &history, Config &config, ToolManager& to
 
       if (message.contains("content") && message["content"].is_string()) {
         std::string chunk = message["content"].get<std::string>();
-        std::cout << chunk << std::flush;
+        std::cout << markdown.feed(chunk) << std::flush;
+        // Raw markdown goes in history/context - the model needs the literal
+        // "**"/"#" syntax back, not the ANSI codes we render it as here.
         responseBuffer += chunk;
       }
 
@@ -89,6 +97,7 @@ Ollama::ask(const std::vector<Message> &history, Config &config, ToolManager& to
     lineBuffer.clear();
     rawBuffer.clear();
     toolCallsAccum.clear();
+    markdown = MarkdownStream();
 
     json json_payload = {{"model", model},
                          {"messages", messages},
@@ -97,10 +106,13 @@ Ollama::ask(const std::vector<Message> &history, Config &config, ToolManager& to
       json_payload["tools"] = tool_defs;
     }
 
+    spinner.start();
     auto r = cpr::Post(cpr::Url{std::string(kBaseUrl) + "/api/chat"},
                        cpr::Header{{"Content-Type", "application/json"}},
                        cpr::Body{json_payload.dump()},
                        cpr::WriteCallback{write_callback});
+    spinner.stop(); // no-op if write_callback already stopped it; covers zero-byte failures
+    std::cout << markdown.finish() << std::flush;
 
     if (r.status_code != 200) {
       std::cerr << "HTTP Error " << r.status_code << ": "
@@ -120,8 +132,8 @@ Ollama::ask(const std::vector<Message> &history, Config &config, ToolManager& to
     for (const auto &tc : toolCallsAccum) {
       const std::string name = tc["function"]["name"].get<std::string>();
       json args = tc["function"]["arguments"];
+      std::cout << "\n\x1b[35m•\x1b[0m " << name << "\n" << std::flush;
       std::string result = tools.execute(args, name);
-      std::cout << "\n[tool: " << name << "]\n" << std::flush;
       messages.push_back({{"role", "tool"}, {"content", result}});
     }
   }

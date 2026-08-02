@@ -1,4 +1,6 @@
 #include "openrouter_provider.h"
+#include "../utils/markdown_stream.h"
+#include "../utils/spinner.h"
 #include <cpr/cpr.h>
 #include <cpr/response.h>
 #include <cstddef>
@@ -26,8 +28,12 @@ OpenRouter::ask(const std::vector<Message> &history, Config &config, ToolManager
   std::string responseBuffer;
   std::string lineBuffer;
   std::map<int, StreamedToolCall> toolCalls;
+  Spinner spinner;
+  MarkdownStream markdown;
 
   auto write_callback = [&](const std::string_view &data, intptr_t) -> bool {
+    // First byte of the response: whatever wait there was is over.
+    spinner.stop();
     lineBuffer += data;
     size_t pos;
     while ((pos = lineBuffer.find('\n')) != std::string::npos) {
@@ -49,7 +55,9 @@ OpenRouter::ask(const std::vector<Message> &history, Config &config, ToolManager
       // Streamed assistant text.
       if (delta.contains("content") && delta["content"].is_string()) {
         std::string chunk = delta["content"].get<std::string>();
-        std::cout << chunk << std::flush;
+        std::cout << markdown.feed(chunk) << std::flush;
+        // Raw markdown goes in history/context - the model needs the literal
+        // "**"/"#" syntax back, not the ANSI codes we render it as here.
         responseBuffer += chunk;
       }
 
@@ -100,6 +108,7 @@ OpenRouter::ask(const std::vector<Message> &history, Config &config, ToolManager
     responseBuffer.clear();
     lineBuffer.clear();
     toolCalls.clear();
+    markdown = MarkdownStream();
 
     json json_payload = {{"model", model},
                          {"reasoning", {{"effort", "low"}}},
@@ -109,11 +118,14 @@ OpenRouter::ask(const std::vector<Message> &history, Config &config, ToolManager
       json_payload["tools"] = tool_defs;
     }
 
+    spinner.start();
     auto r = cpr::Post(cpr::Url{"https://openrouter.ai/api/v1/chat/completions"},
                        cpr::Header{{"Content-Type", "application/json"}},
                        cpr::Header{{"Authorization", "Bearer " + API_KEY}},
                        cpr::Body{json_payload.dump()},
                        cpr::WriteCallback{write_callback});
+    spinner.stop(); // no-op if write_callback already stopped it; covers zero-byte failures
+    std::cout << markdown.finish() << std::flush;
 
     if (r.status_code != 200) {
       std::cerr << "HTTP Error " << r.status_code << ": " << r.text << "\n";
@@ -145,8 +157,8 @@ OpenRouter::ask(const std::vector<Message> &history, Config &config, ToolManager
       if (args.is_discarded()) {
         args = json::object();
       }
+      std::cout << "\n\x1b[35m•\x1b[0m " << tc.name << "\n" << std::flush;
       std::string result = tools.execute(args, tc.name);
-      std::cout << "\n[tool: " << tc.name << "]\n" << std::flush;
       messages.push_back({{"role", "tool"},
                           {"tool_call_id", tc.id},
                           {"content", result}});

@@ -99,8 +99,13 @@ std::string EditFile::execute(nlohmann::json &arguements) {
   modifiedFile << content;
   modifiedFile.close();
 
+  // git's raw header names the two scratch temp files, not the real path the
+  // user cares about - drop "diff --git", "index", "---" and "+++" (lines
+  // 1-4) and print our own header instead so nothing under the OS temp dir
+  // ever reaches the terminal.
+  std::cout << "\x1b[1m\x1b[36m" << path << "\x1b[0m\n";
   auto patch = std::string("git --no-pager diff --no-index --color=always --no-prefix -- ") +
-               originalPath.string() + " " + modifiedPath.string() + " | sed '1,2d'";
+               originalPath.string() + " " + modifiedPath.string() + " | sed '1,4d'";
   std::system(patch.c_str());
   std::filesystem::remove(originalPath);
   std::filesystem::remove(modifiedPath);
