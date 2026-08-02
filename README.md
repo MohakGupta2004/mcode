@@ -1,5 +1,7 @@
 <div align="center">
 
+# mcode
+
 ```
   __  __  ____ ___  ____  _____
  |  \/  |/ ___/ _ \|  _ \| ____|
@@ -130,36 +132,39 @@ Each piece has one job and doesn't reach into the others' internals:
 
 ## Getting started
 
-### Prerequisites
+### Quick install (macOS / Linux)
 
-- macOS or Linux
-- CMake ≥ 3.15
-- A C++20 compiler (Apple Clang, GCC, or Clang)
-- [`nlohmann-json`](https://github.com/nlohmann/json) and [`cpr`](https://github.com/libcpr/cpr)
+```bash
+curl -fsSL https://raw.githubusercontent.com/MohakGupta2004/mcode/master/install.sh | bash
+```
+
+This installs missing build dependencies (`cmake`, a C++20 compiler, `nlohmann-json`, `cpr` — via Homebrew on macOS, or `apt`/`dnf`/`pacman`/`zypper` on Linux, building `cpr` from source if your distro doesn't package it), builds mcode, and drops the `mcode` binary into `/usr/local/bin` (falls back to `~/.local/bin` if that's not writable and there's no `sudo`).
+
+Review [`install.sh`](install.sh) before piping it into `bash` — that's true of any curl-install script, this one included.
+
+Then just run:
+
+```bash
+mcode
+```
+
+### Manual build
+
+Prerequisites: CMake ≥ 3.15, a C++20 compiler, [`nlohmann-json`](https://github.com/nlohmann/json), [`cpr`](https://github.com/libcpr/cpr).
 
 ```bash
 # macOS
 brew install cmake nlohmann-json cpr
-```
 
-### Build
-
-```bash
 git clone https://github.com/MohakGupta2004/mcode.git
 cd mcode
 cmake -S . -B build
 cmake --build build -j
 ```
 
-This produces `build/mcode`.
+This produces `build/mcode`. Run it with `./build/mcode`.
 
-### Run
-
-```bash
-./build/mcode
-```
-
-On first run it creates `~/.config/mcode/config.json` — see [Configuration](#configuration) before you try to use OpenRouter.
+On first run mcode creates `~/.config/mcode/config.json` — see [Configuration](#configuration) before you try to use OpenRouter.
 
 ## Configuration
 
