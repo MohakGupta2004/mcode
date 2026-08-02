@@ -130,8 +130,11 @@ Ollama::ask(const std::vector<Message> &history, Config &config, ToolManager& to
     messages.push_back(assistant_msg);
 
     for (const auto &tc : toolCallsAccum) {
-      const std::string name = tc["function"]["name"].get<std::string>();
-      json args = tc["function"]["arguments"];
+      const json &fn = tc["function"];
+      const std::string name = fn.contains("name") && fn["name"].is_string()
+                                    ? fn["name"].get<std::string>()
+                                    : "";
+      json args = fn.contains("arguments") ? fn["arguments"] : json::object();
       std::cout << "\n\x1b[35m•\x1b[0m " << name << "\n" << std::flush;
       std::string result = tools.execute(args, name);
       messages.push_back({{"role", "tool"}, {"content", result}});

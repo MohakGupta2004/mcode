@@ -43,8 +43,7 @@ void Config::load() {
 
             file << R"({
     "API_KEY": {
-        "claude":"",
-        "openai":""
+        "openrouter":""
     }
 })";
 
